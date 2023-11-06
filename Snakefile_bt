@@ -1,0 +1,595 @@
+# if ran on cluster, change all "conda: config['envfile']" to "conda: 'env_cluster.yaml'"
+
+configfile:
+    'config.yaml'
+
+N = list(range(config['repetitions']))
+
+rule all:
+    input:
+        expand('bootstrapping_test{test_percentage}_val{validation_percentage}_repeat' + str(config['repetitions']) + '/{file}_impute_{imputation}/{s}_trial_' + str(config['trial']) + '/{s}_{file}_median_{metric}s_and_hyperparams.json', test_percentage=config['test_percentage'], validation_percentage=config['validation_percentage'], s=config['solver'], file=config['file'], imputation=config['imputation'], metric=config['metric']),
+        expand('bootstrapping_test{test_percentage}_val{validation_percentage}_repeat' + str(config['repetitions']) + '/{file}_impute_{imputation}/{file}_trial_' + str(config['trial']) + '_{metric}plot.pdf', test_percentage=config['test_percentage'], validation_percentage=config['validation_percentage'], file=config['file'], imputation=config['imputation'], metric=config['metric'])
+
+rule bt_split:
+    input:
+        expand('data/{file}.csv', allow_missing=True),
+        expand('data/{file}_outputs.csv', allow_missing=True)
+    output:
+        expand('bootstrapping_test{test_percentage}_val{validation_percentage}_repeat' + str(config['repetitions']) + '/{file}_impute_{imputation}/splits/{file}_y_outer_split{k}.npy', k=N, allow_missing=True),
+        expand('bootstrapping_test{test_percentage}_val{validation_percentage}_repeat' + str(config['repetitions']) + '/{file}_impute_{imputation}/splits/{file}_y_inner_split{k}.npy', k=N, allow_missing=True)
+    params:
+        cpus = '1',
+        mem = '1G',
+        gpus = '0',
+        walltime = '00:00:59'
+    conda:
+        config['envfile']
+    script:
+        'scripts/bt_split.py'
+
+if 'SVR' in config['solver']:
+    rule train_and_validate_SVR:
+        input:
+            expand('data/{file}.csv', allow_missing=True),
+            expand('data/{file}_outputs.csv', allow_missing=True),
+            expand('bootstrapping_test{test_percentage}_val{validation_percentage}_repeat' + str(config['repetitions']) + '/{file}_impute_{imputation}/splits/{file}_y_outer_split{k}.npy', allow_missing=True),
+            expand('bootstrapping_test{test_percentage}_val{validation_percentage}_repeat' + str(config['repetitions']) + '/{file}_impute_{imputation}/splits/{file}_y_inner_split{k}.npy', allow_missing=True)
+        output:
+            expand('bootstrapping_test{test_percentage}_val{validation_percentage}_repeat' + str(config['repetitions']) + '/{file}_impute_{imputation}/SVR_trial_' + str(config['trial']) + '/inner/SVR_{file}_{kernel}_{kernel_param}_C{C}_eps{eps}_split{k}_{metric}s.npy', allow_missing=True)
+        params:
+            cpus = '1',
+            mem = '1G',
+            gpus = '0',
+            walltime = '00:00:59'
+        conda:
+            config['envfile']
+        script:
+            'scripts/SVR.py'
+
+    rule mean_scores_SVR:
+        input:
+            expand('bootstrapping_test{test_percentage}_val{validation_percentage}_repeat' + str(config['repetitions']) + '/{file}_impute_{imputation}/SVR_trial_' + str(config['trial']) + '/inner/SVR_{file}_{kernel}_{kernel_param}_C{C}_eps{eps}_split{k}_{metric}s.npy', allow_missing=True)
+        output:
+            expand('bootstrapping_test{test_percentage}_val{validation_percentage}_repeat' + str(config['repetitions']) + '/{file}_impute_{imputation}/SVR_trial_' + str(config['trial']) + '/inner/SVR_{file}_{kernel}_{kernel_param}_C{C}_eps{eps}_split{k}_mean_{metric}.npy', allow_missing=True)
+        params:
+            cpus = '1',
+            mem = '1G',
+            gpus = '0',
+            walltime = '00:00:59'
+        conda:
+            config['envfile']
+        script:
+            'scripts/mean_scores.py'
+
+    rule get_best_inner_hyperparams_SVR:
+        input:
+            expand('bootstrapping_test{test_percentage}_val{validation_percentage}_repeat' + str(config['repetitions']) + '/{file}_impute_{imputation}/SVR_trial_' + str(config['trial']) + '/inner/SVR_{file}_{kernel}_{kernel_param}_C{C}_eps{eps}_split{k}_mean_{metric}.npy', kernel=config['kernel'], kernel_param=config['kernel_param'], C=config['C'], eps=config['eps'], allow_missing=True)
+        output:
+            expand('bootstrapping_test{test_percentage}_val{validation_percentage}_repeat' + str(config['repetitions']) + '/{file}_impute_{imputation}/SVR_trial_' + str(config['trial']) + '/inner/SVR_{file}_split{k}_best_inner_hyperparams_{metric}.json', allow_missing=True)
+        params:
+            cpus = '1',
+            mem = '1G',
+            gpus = '0',
+            walltime = '00:00:59'
+        conda:
+            config['envfile']
+        script:
+            'scripts/get_best_inner_hyperparams.py'
+
+    rule test_SVR:
+        input:
+            expand('data/{file}.csv', allow_missing=True),
+            expand('data/{file}_outputs.csv', allow_missing=True),
+            expand('bootstrapping_test{test_percentage}_val{validation_percentage}_repeat' + str(config['repetitions']) + '/{file}_impute_{imputation}/splits/{file}_y_outer_split{k}.npy', allow_missing=True),
+            expand('bootstrapping_test{test_percentage}_val{validation_percentage}_repeat' + str(config['repetitions']) + '/{file}_impute_{imputation}/SVR_trial_' + str(config['trial']) + '/inner/SVR_{file}_split{k}_best_inner_hyperparams_{metric}.json', allow_missing=True)
+        output:
+            expand('bootstrapping_test{test_percentage}_val{validation_percentage}_repeat' + str(config['repetitions']) + '/{file}_impute_{imputation}/SVR_trial_' + str(config['trial']) + '/outer/SVR_{file}_split{k}_{metric}s.npy', allow_missing=True)
+        params:
+            cpus = '1',
+            mem = '1G',
+            gpus = '0',
+            walltime = '00:00:59'
+        conda:
+            config['envfile']
+        script:
+            'scripts/SVR.py'
+
+if 'LSSVR' in config['solver']:
+    rule train_and_validate_LSSVR:
+        input:
+            expand('data/{file}.csv', allow_missing=True),
+            expand('data/{file}_outputs.csv', allow_missing=True),
+            expand('bootstrapping_test{test_percentage}_val{validation_percentage}_repeat' + str(config['repetitions']) + '/{file}_impute_{imputation}/splits/{file}_y_outer_split{k}.npy', allow_missing=True),
+            expand('bootstrapping_test{test_percentage}_val{validation_percentage}_repeat' + str(config['repetitions']) + '/{file}_impute_{imputation}/splits/{file}_y_inner_split{k}.npy', allow_missing=True)
+        output:
+            expand('bootstrapping_test{test_percentage}_val{validation_percentage}_repeat' + str(config['repetitions']) + '/{file}_impute_{imputation}/LSSVR_trial_' + str(config['trial']) + '/inner/LSSVR_{file}_{kernel}_{kernel_param}_C{C}_split{k}_{metric}s.npy', allow_missing=True)
+        params:
+            cpus = '1',
+            mem = '1G',
+            gpus = '0',
+            walltime = '00:00:59'
+        conda:
+            config['envfile']
+        script:
+            'scripts/LSSVR.py'
+
+    rule mean_scores_LSSVR:
+        input:
+            expand('bootstrapping_test{test_percentage}_val{validation_percentage}_repeat' + str(config['repetitions']) + '/{file}_impute_{imputation}/LSSVR_trial_' + str(config['trial']) + '/inner/LSSVR_{file}_{kernel}_{kernel_param}_C{C}_split{k}_{metric}s.npy', allow_missing=True)
+        output:
+            expand('bootstrapping_test{test_percentage}_val{validation_percentage}_repeat' + str(config['repetitions']) + '/{file}_impute_{imputation}/LSSVR_trial_' + str(config['trial']) + '/inner/LSSVR_{file}_{kernel}_{kernel_param}_C{C}_split{k}_mean_{metric}.npy', allow_missing=True)
+        params:
+            cpus = '1',
+            mem = '1G',
+            gpus = '0',
+            walltime = '00:00:59'
+        conda:
+            config['envfile']
+        script:
+            'scripts/mean_scores.py'
+
+    rule get_best_inner_hyperparams_LSSVR:
+        input:
+            expand('bootstrapping_test{test_percentage}_val{validation_percentage}_repeat' + str(config['repetitions']) + '/{file}_impute_{imputation}/LSSVR_trial_' + str(config['trial']) + '/inner/LSSVR_{file}_{kernel}_{kernel_param}_C{C}_split{k}_mean_{metric}.npy', kernel=config['kernel'], kernel_param=config['kernel_param'], C=config['C'], allow_missing=True)
+        output:
+            expand('bootstrapping_test{test_percentage}_val{validation_percentage}_repeat' + str(config['repetitions']) + '/{file}_impute_{imputation}/LSSVR_trial_' + str(config['trial']) + '/inner/LSSVR_{file}_split{k}_best_inner_hyperparams_{metric}.json', allow_missing=True)
+        params:
+            cpus = '1',
+            mem = '1G',
+            gpus = '0',
+            walltime = '00:00:59'
+        conda:
+            config['envfile']
+        script:
+            'scripts/get_best_inner_hyperparams.py'
+
+    rule test_LSSVR:
+        input:
+            expand('data/{file}.csv', allow_missing=True),
+            expand('data/{file}_outputs.csv', allow_missing=True),
+            expand('bootstrapping_test{test_percentage}_val{validation_percentage}_repeat' + str(config['repetitions']) + '/{file}_impute_{imputation}/splits/{file}_y_outer_split{k}.npy', allow_missing=True),
+            expand('bootstrapping_test{test_percentage}_val{validation_percentage}_repeat' + str(config['repetitions']) + '/{file}_impute_{imputation}/LSSVR_trial_' + str(config['trial']) + '/inner/LSSVR_{file}_split{k}_best_inner_hyperparams_{metric}.json', allow_missing=True)
+        output:
+            expand('bootstrapping_test{test_percentage}_val{validation_percentage}_repeat' + str(config['repetitions']) + '/{file}_impute_{imputation}/LSSVR_trial_' + str(config['trial']) + '/outer/LSSVR_{file}_split{k}_{metric}s.npy', allow_missing=True)
+        params:
+            cpus = '1',
+            mem = '1G',
+            gpus = '0',
+            walltime = '00:00:59'
+        conda:
+            config['envfile']
+        script:
+            'scripts/LSSVR.py'
+
+if 'MSVR' in config['solver']:
+    rule train_and_validate_MSVR:
+        input:
+            expand('data/{file}.csv', allow_missing=True),
+            expand('data/{file}_outputs.csv', allow_missing=True),
+            expand('bootstrapping_test{test_percentage}_val{validation_percentage}_repeat' + str(config['repetitions']) + '/{file}_impute_{imputation}/splits/{file}_y_outer_split{k}.npy', allow_missing=True),
+            expand('bootstrapping_test{test_percentage}_val{validation_percentage}_repeat' + str(config['repetitions']) + '/{file}_impute_{imputation}/splits/{file}_y_inner_split{k}.npy', allow_missing=True)
+        output:
+            expand('bootstrapping_test{test_percentage}_val{validation_percentage}_repeat' + str(config['repetitions']) + '/{file}_impute_{imputation}/MSVR_trial_' + str(config['trial']) + '/inner/MSVR_{file}_{kernel}_{kernel_param}_C{C}_eps{eps}_split{k}_{metric}s.npy', allow_missing=True)
+        params:
+            cpus = '1',
+            mem = '1G',
+            gpus = '0',
+            walltime = '00:00:59'
+        conda:
+            config['envfile']
+        script:
+            'scripts/MSVR.py'
+
+    rule mean_scores_MSVR:
+        input:
+            expand('bootstrapping_test{test_percentage}_val{validation_percentage}_repeat' + str(config['repetitions']) + '/{file}_impute_{imputation}/MSVR_trial_' + str(config['trial']) + '/inner/MSVR_{file}_{kernel}_{kernel_param}_C{C}_eps{eps}_split{k}_{metric}s.npy', allow_missing=True)
+        output:
+            expand('bootstrapping_test{test_percentage}_val{validation_percentage}_repeat' + str(config['repetitions']) + '/{file}_impute_{imputation}/MSVR_trial_' + str(config['trial']) + '/inner/MSVR_{file}_{kernel}_{kernel_param}_C{C}_eps{eps}_split{k}_mean_{metric}.npy', allow_missing=True)
+        params:
+            cpus = '1',
+            mem = '1G',
+            gpus = '0',
+            walltime = '00:00:59'
+        conda:
+            config['envfile']
+        script:
+            'scripts/mean_scores.py'
+
+    rule get_best_inner_hyperparams_MSVR:
+        input:
+            expand('bootstrapping_test{test_percentage}_val{validation_percentage}_repeat' + str(config['repetitions']) + '/{file}_impute_{imputation}/MSVR_trial_' + str(config['trial']) + '/inner/MSVR_{file}_{kernel}_{kernel_param}_C{C}_eps{eps}_split{k}_mean_{metric}.npy', kernel=config['kernel'], kernel_param=config['kernel_param'], C=config['C'], eps=config['eps'], allow_missing=True)
+        output:
+            expand('bootstrapping_test{test_percentage}_val{validation_percentage}_repeat' + str(config['repetitions']) + '/{file}_impute_{imputation}/MSVR_trial_' + str(config['trial']) + '/inner/MSVR_{file}_split{k}_best_inner_hyperparams_{metric}.json', allow_missing=True)
+        params:
+            cpus = '1',
+            mem = '1G',
+            gpus = '0',
+            walltime = '00:00:59'
+        conda:
+            config['envfile']
+        script:
+            'scripts/get_best_inner_hyperparams.py'
+
+    rule test_MSVR:
+        input:
+            expand('data/{file}.csv', allow_missing=True),
+            expand('data/{file}_outputs.csv', allow_missing=True),
+            expand('bootstrapping_test{test_percentage}_val{validation_percentage}_repeat' + str(config['repetitions']) + '/{file}_impute_{imputation}/splits/{file}_y_outer_split{k}.npy', allow_missing=True),
+            expand('bootstrapping_test{test_percentage}_val{validation_percentage}_repeat' + str(config['repetitions']) + '/{file}_impute_{imputation}/MSVR_trial_' + str(config['trial']) + '/inner/MSVR_{file}_split{k}_best_inner_hyperparams_{metric}.json', allow_missing=True)
+        output:
+            expand('bootstrapping_test{test_percentage}_val{validation_percentage}_repeat' + str(config['repetitions']) + '/{file}_impute_{imputation}/MSVR_trial_' + str(config['trial']) + '/outer/MSVR_{file}_split{k}_{metric}s.npy', allow_missing=True)
+        params:
+            cpus = '1',
+            mem = '1G',
+            gpus = '0',
+            walltime = '00:00:59'
+        conda:
+            config['envfile']
+        script:
+            'scripts/MSVR.py'
+
+if 'MSVR2' in config['solver']:
+    rule train_and_validate_MSVR2:
+        input:
+            expand('data/{file}.csv', allow_missing=True),
+            expand('data/{file}_outputs.csv', allow_missing=True),
+            expand('bootstrapping_test{test_percentage}_val{validation_percentage}_repeat' + str(config['repetitions']) + '/{file}_impute_{imputation}/splits/{file}_y_outer_split{k}.npy', allow_missing=True),
+            expand('bootstrapping_test{test_percentage}_val{validation_percentage}_repeat' + str(config['repetitions']) + '/{file}_impute_{imputation}/splits/{file}_y_inner_split{k}.npy', allow_missing=True)
+        output:
+            expand('bootstrapping_test{test_percentage}_val{validation_percentage}_repeat' + str(config['repetitions']) + '/{file}_impute_{imputation}/MSVR2_trial_' + str(config['trial']) + '/inner/MSVR2_{file}_{kernel}_{kernel_param}_C{C}_eps{eps}_split{k}_{metric}s.npy', allow_missing=True)
+        params:
+            cpus = '1',
+            mem = '1G',
+            gpus = '0',
+            walltime = '00:00:59'
+        conda:
+            config['envfile']
+        script:
+            'scripts/MSVR2.py'
+
+    rule mean_scores_MSVR2:
+        input:
+            expand('bootstrapping_test{test_percentage}_val{validation_percentage}_repeat' + str(config['repetitions']) + '/{file}_impute_{imputation}/MSVR2_trial_' + str(config['trial']) + '/inner/MSVR2_{file}_{kernel}_{kernel_param}_C{C}_eps{eps}_split{k}_{metric}s.npy', allow_missing=True)
+        output:
+            expand('bootstrapping_test{test_percentage}_val{validation_percentage}_repeat' + str(config['repetitions']) + '/{file}_impute_{imputation}/MSVR2_trial_' + str(config['trial']) + '/inner/MSVR2_{file}_{kernel}_{kernel_param}_C{C}_eps{eps}_split{k}_mean_{metric}.npy', allow_missing=True)
+        params:
+            cpus = '1',
+            mem = '1G',
+            gpus = '0',
+            walltime = '00:00:59'
+        conda:
+            config['envfile']
+        script:
+            'scripts/mean_scores.py'
+
+    rule get_best_inner_hyperparams_MSVR2:
+        input:
+            expand('bootstrapping_test{test_percentage}_val{validation_percentage}_repeat' + str(config['repetitions']) + '/{file}_impute_{imputation}/MSVR2_trial_' + str(config['trial']) + '/inner/MSVR2_{file}_{kernel}_{kernel_param}_C{C}_eps{eps}_split{k}_mean_{metric}.npy', kernel=config['kernel'], kernel_param=config['kernel_param'], C=config['C'], eps=config['eps'], allow_missing=True)
+        output:
+            expand('bootstrapping_test{test_percentage}_val{validation_percentage}_repeat' + str(config['repetitions']) + '/{file}_impute_{imputation}/MSVR2_trial_' + str(config['trial']) + '/inner/MSVR2_{file}_split{k}_best_inner_hyperparams_{metric}.json', allow_missing=True)
+        params:
+            cpus = '1',
+            mem = '1G',
+            gpus = '0',
+            walltime = '00:00:59'
+        conda:
+            config['envfile']
+        script:
+            'scripts/get_best_inner_hyperparams.py'
+
+    rule test_MSVR2:
+        input:
+            expand('data/{file}.csv', allow_missing=True),
+            expand('data/{file}_outputs.csv', allow_missing=True),
+            expand('bootstrapping_test{test_percentage}_val{validation_percentage}_repeat' + str(config['repetitions']) + '/{file}_impute_{imputation}/splits/{file}_y_outer_split{k}.npy', allow_missing=True),
+            expand('bootstrapping_test{test_percentage}_val{validation_percentage}_repeat' + str(config['repetitions']) + '/{file}_impute_{imputation}/MSVR2_trial_' + str(config['trial']) + '/inner/MSVR2_{file}_split{k}_best_inner_hyperparams_{metric}.json', allow_missing=True)
+        output:
+            expand('bootstrapping_test{test_percentage}_val{validation_percentage}_repeat' + str(config['repetitions']) + '/{file}_impute_{imputation}/MSVR2_trial_' + str(config['trial']) + '/outer/MSVR2_{file}_split{k}_{metric}s.npy', allow_missing=True)
+        params:
+            cpus = '1',
+            mem = '1G',
+            gpus = '0',
+            walltime = '00:00:59'
+        conda:
+            config['envfile']
+        script:
+            'scripts/MSVR2.py'
+
+if 'ELSSVR' in config['solver']:
+    rule train_and_validate_ELSSVR:
+        input:
+            expand('data/{file}.csv', allow_missing=True),
+            expand('data/{file}_outputs.csv', allow_missing=True),
+            expand('bootstrapping_test{test_percentage}_val{validation_percentage}_repeat' + str(config['repetitions']) + '/{file}_impute_{imputation}/splits/{file}_y_outer_split{k}.npy', allow_missing=True),
+            expand('bootstrapping_test{test_percentage}_val{validation_percentage}_repeat' + str(config['repetitions']) + '/{file}_impute_{imputation}/splits/{file}_y_inner_split{k}.npy', allow_missing=True)
+        output:
+            expand('bootstrapping_test{test_percentage}_val{validation_percentage}_repeat' + str(config['repetitions']) + '/{file}_impute_{imputation}/ELSSVR_trial_' + str(config['trial']) + '/inner/ELSSVR_{file}_{kernel}_{kernel_param}_C{C}_zeta{zeta}_split{k}_{metric}s.npy', allow_missing=True)
+        params:
+            cpus = '1',
+            mem = '1G',
+            gpus = '0',
+            walltime = '00:00:59'
+        conda:
+            config['envfile']
+        script:
+            'scripts/ELSSVR.py'
+
+    rule mean_scores_ELSSVR:
+        input:
+            expand('bootstrapping_test{test_percentage}_val{validation_percentage}_repeat' + str(config['repetitions']) + '/{file}_impute_{imputation}/ELSSVR_trial_' + str(config['trial']) + '/inner/ELSSVR_{file}_{kernel}_{kernel_param}_C{C}_zeta{zeta}_split{k}_{metric}s.npy', allow_missing=True)
+        output:
+            expand('bootstrapping_test{test_percentage}_val{validation_percentage}_repeat' + str(config['repetitions']) + '/{file}_impute_{imputation}/ELSSVR_trial_' + str(config['trial']) + '/inner/ELSSVR_{file}_{kernel}_{kernel_param}_C{C}_zeta{zeta}_split{k}_mean_{metric}.npy', allow_missing=True)
+        params:
+            cpus = '1',
+            mem = '1G',
+            gpus = '0',
+            walltime = '00:00:59'
+        conda:
+            config['envfile']
+        script:
+            'scripts/mean_scores.py'
+
+    rule get_best_inner_hyperparams_ELSSVR:
+        input:
+            expand('bootstrapping_test{test_percentage}_val{validation_percentage}_repeat' + str(config['repetitions']) + '/{file}_impute_{imputation}/ELSSVR_trial_' + str(config['trial']) + '/inner/ELSSVR_{file}_{kernel}_{kernel_param}_C{C}_zeta{zeta}_split{k}_mean_{metric}.npy', kernel=config['kernel'], kernel_param=config['kernel_param'], C=config['C'], zeta=config['zeta'], allow_missing=True)
+        output:
+            expand('bootstrapping_test{test_percentage}_val{validation_percentage}_repeat' + str(config['repetitions']) + '/{file}_impute_{imputation}/ELSSVR_trial_' + str(config['trial']) + '/inner/ELSSVR_{file}_split{k}_best_inner_hyperparams_{metric}.json', allow_missing=True)
+        params:
+            cpus = '1',
+            mem = '1G',
+            gpus = '0',
+            walltime = '00:00:59'
+        conda:
+            config['envfile']
+        script:
+            'scripts/get_best_inner_hyperparams.py'
+
+    rule test_ELSSVR:
+        input:
+            expand('data/{file}.csv', allow_missing=True),
+            expand('data/{file}_outputs.csv', allow_missing=True),
+            expand('bootstrapping_test{test_percentage}_val{validation_percentage}_repeat' + str(config['repetitions']) + '/{file}_impute_{imputation}/splits/{file}_y_outer_split{k}.npy', allow_missing=True),
+            expand('bootstrapping_test{test_percentage}_val{validation_percentage}_repeat' + str(config['repetitions']) + '/{file}_impute_{imputation}/ELSSVR_trial_' + str(config['trial']) + '/inner/ELSSVR_{file}_split{k}_best_inner_hyperparams_{metric}.json', allow_missing=True)
+        output:
+            expand('bootstrapping_test{test_percentage}_val{validation_percentage}_repeat' + str(config['repetitions']) + '/{file}_impute_{imputation}/ELSSVR_trial_' + str(config['trial']) + '/outer/ELSSVR_{file}_split{k}_{metric}s.npy', allow_missing=True)
+        params:
+            cpus = '1',
+            mem = '1G',
+            gpus = '0',
+            walltime = '00:00:59'
+        conda:
+            config['envfile']
+        script:
+            'scripts/ELSSVR.py'
+
+if 'MLSSVR' in config['solver']:
+    rule train_and_validate_MLSSVR:
+        input:
+            expand('data/{file}.csv', allow_missing=True),
+            expand('data/{file}_outputs.csv', allow_missing=True),
+            expand('bootstrapping_test{test_percentage}_val{validation_percentage}_repeat' + str(config['repetitions']) + '/{file}_impute_{imputation}/splits/{file}_y_outer_split{k}.npy', allow_missing=True),
+            expand('bootstrapping_test{test_percentage}_val{validation_percentage}_repeat' + str(config['repetitions']) + '/{file}_impute_{imputation}/splits/{file}_y_inner_split{k}.npy', allow_missing=True)
+        output:
+            expand('bootstrapping_test{test_percentage}_val{validation_percentage}_repeat' + str(config['repetitions']) + '/{file}_impute_{imputation}/MLSSVR_trial_' + str(config['trial']) + '/inner/MLSSVR_{file}_{kernel}_{kernel_param}_C{C}_CC{CC}_split{k}_{metric}s.npy', allow_missing=True)
+        params:
+            cpus = '1',
+            mem = '1G',
+            gpus = '0',
+            walltime = '00:00:59'
+        conda:
+            config['envfile']
+        script:
+            'scripts/MLSSVR.py'
+
+    rule mean_scores_MLSSVR:
+        input:
+            expand('bootstrapping_test{test_percentage}_val{validation_percentage}_repeat' + str(config['repetitions']) + '/{file}_impute_{imputation}/MLSSVR_trial_' + str(config['trial']) + '/inner/MLSSVR_{file}_{kernel}_{kernel_param}_C{C}_CC{CC}_split{k}_{metric}s.npy', allow_missing=True)
+        output:
+            expand('bootstrapping_test{test_percentage}_val{validation_percentage}_repeat' + str(config['repetitions']) + '/{file}_impute_{imputation}/MLSSVR_trial_' + str(config['trial']) + '/inner/MLSSVR_{file}_{kernel}_{kernel_param}_C{C}_CC{CC}_split{k}_mean_{metric}.npy', allow_missing=True)
+        params:
+            cpus = '1',
+            mem = '1G',
+            gpus = '0',
+            walltime = '00:00:59'
+        conda:
+            config['envfile']
+        script:
+            'scripts/mean_scores.py'
+
+    rule get_best_inner_hyperparams_MLSSVR:
+        input:
+            expand('bootstrapping_test{test_percentage}_val{validation_percentage}_repeat' + str(config['repetitions']) + '/{file}_impute_{imputation}/MLSSVR_trial_' + str(config['trial']) + '/inner/MLSSVR_{file}_{kernel}_{kernel_param}_C{C}_CC{CC}_split{k}_mean_{metric}.npy', kernel=config['kernel'], kernel_param=config['kernel_param'], C=config['C'], CC=config['CC'], allow_missing=True)
+        output:
+            expand('bootstrapping_test{test_percentage}_val{validation_percentage}_repeat' + str(config['repetitions']) + '/{file}_impute_{imputation}/MLSSVR_trial_' + str(config['trial']) + '/inner/MLSSVR_{file}_split{k}_best_inner_hyperparams_{metric}.json', allow_missing=True)
+        params:
+            cpus = '1',
+            mem = '1G',
+            gpus = '0',
+            walltime = '00:00:59'
+        conda:
+            config['envfile']
+        script:
+            'scripts/get_best_inner_hyperparams.py'
+
+    rule test_MLSSVR:
+        input:
+            expand('data/{file}.csv', allow_missing=True),
+            expand('data/{file}_outputs.csv', allow_missing=True),
+            expand('bootstrapping_test{test_percentage}_val{validation_percentage}_repeat' + str(config['repetitions']) + '/{file}_impute_{imputation}/splits/{file}_y_outer_split{k}.npy', allow_missing=True),
+            expand('bootstrapping_test{test_percentage}_val{validation_percentage}_repeat' + str(config['repetitions']) + '/{file}_impute_{imputation}/MLSSVR_trial_' + str(config['trial']) + '/inner/MLSSVR_{file}_split{k}_best_inner_hyperparams_{metric}.json', allow_missing=True)
+        output:
+            expand('bootstrapping_test{test_percentage}_val{validation_percentage}_repeat' + str(config['repetitions']) + '/{file}_impute_{imputation}/MLSSVR_trial_' + str(config['trial']) + '/outer/MLSSVR_{file}_split{k}_{metric}s.npy', allow_missing=True)
+        params:
+            cpus = '1',
+            mem = '1G',
+            gpus = '0',
+            walltime = '00:00:59'
+        conda:
+            config['envfile']
+        script:
+            'scripts/MLSSVR.py'
+
+if 'ANNind' in config['solver']:
+    rule train_and_validate_ANNind:
+        input:
+            expand('data/{file}.csv', allow_missing=True),
+            expand('data/{file}_outputs.csv', allow_missing=True),
+            expand('bootstrapping_test{test_percentage}_val{validation_percentage}_repeat' + str(config['repetitions']) + '/{file}_impute_{imputation}/splits/{file}_y_outer_split{k}.npy', allow_missing=True),
+            expand('bootstrapping_test{test_percentage}_val{validation_percentage}_repeat' + str(config['repetitions']) + '/{file}_impute_{imputation}/splits/{file}_y_inner_split{k}.npy', allow_missing=True)
+        output:
+            expand('bootstrapping_test{test_percentage}_val{validation_percentage}_repeat' + str(config['repetitions']) + '/{file}_impute_{imputation}/ANNind_trial_' + str(config['trial']) + '/inner/ANNind_{file}_nl{nl}_hs{hs}_lr{lr}_split{k}_{metric}s.npy', allow_missing=True)
+        params:
+            cpus = '1',
+            mem = '1G',
+            gpus = '0',
+            walltime = '00:04:59'
+        conda:
+            config['envfile']
+        script:
+            'scripts/ANN.py'
+
+    rule mean_scores_ANNind:
+        input:
+            expand('bootstrapping_test{test_percentage}_val{validation_percentage}_repeat' + str(config['repetitions']) + '/{file}_impute_{imputation}/ANNind_trial_' + str(config['trial']) + '/inner/ANNind_{file}_nl{nl}_hs{hs}_lr{lr}_split{k}_{metric}s.npy', allow_missing=True)
+        output:
+            expand('bootstrapping_test{test_percentage}_val{validation_percentage}_repeat' + str(config['repetitions']) + '/{file}_impute_{imputation}/ANNind_trial_' + str(config['trial']) + '/inner/ANNind_{file}_nl{nl}_hs{hs}_lr{lr}_split{k}_mean_{metric}.npy', allow_missing=True)
+        params:
+            cpus = '1',
+            mem = '1G',
+            gpus = '0',
+            walltime = '00:00:59'
+        conda:
+            config['envfile']
+        script:
+            'scripts/mean_scores.py'
+
+    rule get_best_inner_hyperparams_ANNind:
+        input:
+            expand('bootstrapping_test{test_percentage}_val{validation_percentage}_repeat' + str(config['repetitions']) + '/{file}_impute_{imputation}/ANNind_trial_' + str(config['trial']) + '/inner/ANNind_{file}_nl{nl}_hs{hs}_lr{lr}_split{k}_mean_{metric}.npy', nl=config['num_layers'], hs=config['hidden_size'], lr=config['learning_rate'], allow_missing=True)
+        output:
+            expand('bootstrapping_test{test_percentage}_val{validation_percentage}_repeat' + str(config['repetitions']) + '/{file}_impute_{imputation}/ANNind_trial_' + str(config['trial']) + '/inner/ANNind_{file}_split{k}_best_inner_hyperparams_{metric}.json', allow_missing=True)
+        params:
+            cpus = '1',
+            mem = '1G',
+            gpus = '0',
+            walltime = '00:00:59'
+        conda:
+            config['envfile']
+        script:
+            'scripts/get_best_inner_hyperparams.py'
+
+    rule test_ANNind:
+        input:
+            expand('data/{file}.csv', allow_missing=True),
+            expand('data/{file}_outputs.csv', allow_missing=True),
+            expand('bootstrapping_test{test_percentage}_val{validation_percentage}_repeat' + str(config['repetitions']) + '/{file}_impute_{imputation}/splits/{file}_y_outer_split{k}.npy', allow_missing=True),
+            expand('bootstrapping_test{test_percentage}_val{validation_percentage}_repeat' + str(config['repetitions']) + '/{file}_impute_{imputation}/ANNind_trial_' + str(config['trial']) + '/inner/ANNind_{file}_split{k}_best_inner_hyperparams_{metric}.json', allow_missing=True)
+        output:
+            expand('bootstrapping_test{test_percentage}_val{validation_percentage}_repeat' + str(config['repetitions']) + '/{file}_impute_{imputation}/ANNind_trial_' + str(config['trial']) + '/outer/ANNind_{file}_split{k}_{metric}s.npy', allow_missing=True)
+        params:
+            cpus = '1',
+            mem = '1G',
+            gpus = '0',
+            walltime = '00:04:59'
+        conda:
+            config['envfile']
+        script:
+            'scripts/ANN.py'
+
+if 'ANN' in config['solver']:
+    rule train_and_validate_ANN:
+        input:
+            expand('data/{file}.csv', allow_missing=True),
+            expand('data/{file}_outputs.csv', allow_missing=True),
+            expand('bootstrapping_test{test_percentage}_val{validation_percentage}_repeat' + str(config['repetitions']) + '/{file}_impute_{imputation}/splits/{file}_y_outer_split{k}.npy', allow_missing=True),
+            expand('bootstrapping_test{test_percentage}_val{validation_percentage}_repeat' + str(config['repetitions']) + '/{file}_impute_{imputation}/splits/{file}_y_inner_split{k}.npy', allow_missing=True)
+        output:
+            expand('bootstrapping_test{test_percentage}_val{validation_percentage}_repeat' + str(config['repetitions']) + '/{file}_impute_{imputation}/ANN_trial_' + str(config['trial']) + '/inner/ANN_{file}_nl{nl}_hs{hs}_lr{lr}_split{k}_{metric}s.npy', allow_missing=True)
+        params:
+            cpus = '1',
+            mem = '1G',
+            gpus = '0',
+            walltime = '00:04:59'
+        conda:
+            config['envfile']
+        script:
+            'scripts/ANN.py'
+
+    rule mean_scores_ANN:
+        input:
+            expand('bootstrapping_test{test_percentage}_val{validation_percentage}_repeat' + str(config['repetitions']) + '/{file}_impute_{imputation}/ANN_trial_' + str(config['trial']) + '/inner/ANN_{file}_nl{nl}_hs{hs}_lr{lr}_split{k}_{metric}s.npy', allow_missing=True)
+        output:
+            expand('bootstrapping_test{test_percentage}_val{validation_percentage}_repeat' + str(config['repetitions']) + '/{file}_impute_{imputation}/ANN_trial_' + str(config['trial']) + '/inner/ANN_{file}_nl{nl}_hs{hs}_lr{lr}_split{k}_mean_{metric}.npy', allow_missing=True)
+        params:
+            cpus = '1',
+            mem = '1G',
+            gpus = '0',
+            walltime = '00:00:59'
+        conda:
+            config['envfile']
+        script:
+            'scripts/mean_scores.py'
+
+    rule get_best_inner_hyperparams_ANN:
+        input:
+            expand('bootstrapping_test{test_percentage}_val{validation_percentage}_repeat' + str(config['repetitions']) + '/{file}_impute_{imputation}/ANN_trial_' + str(config['trial']) + '/inner/ANN_{file}_nl{nl}_hs{hs}_lr{lr}_split{k}_mean_{metric}.npy', nl=config['num_layers'], hs=config['hidden_size'], lr=config['learning_rate'], allow_missing=True)
+        output:
+            expand('bootstrapping_test{test_percentage}_val{validation_percentage}_repeat' + str(config['repetitions']) + '/{file}_impute_{imputation}/ANN_trial_' + str(config['trial']) + '/inner/ANN_{file}_split{k}_best_inner_hyperparams_{metric}.json', allow_missing=True)
+        params:
+            cpus = '1',
+            mem = '1G',
+            gpus = '0',
+            walltime = '00:00:59'
+        conda:
+            config['envfile']
+        script:
+            'scripts/get_best_inner_hyperparams.py'
+
+    rule test_ANN:
+        input:
+            expand('data/{file}.csv', allow_missing=True),
+            expand('data/{file}_outputs.csv', allow_missing=True),
+            expand('bootstrapping_test{test_percentage}_val{validation_percentage}_repeat' + str(config['repetitions']) + '/{file}_impute_{imputation}/splits/{file}_y_outer_split{k}.npy', allow_missing=True),
+            expand('bootstrapping_test{test_percentage}_val{validation_percentage}_repeat' + str(config['repetitions']) + '/{file}_impute_{imputation}/ANN_trial_' + str(config['trial']) + '/inner/ANN_{file}_split{k}_best_inner_hyperparams_{metric}.json', allow_missing=True)
+        output:
+            expand('bootstrapping_test{test_percentage}_val{validation_percentage}_repeat' + str(config['repetitions']) + '/{file}_impute_{imputation}/ANN_trial_' + str(config['trial']) + '/outer/ANN_{file}_split{k}_{metric}s.npy', allow_missing=True)
+        params:
+            cpus = '1',
+            mem = '1G',
+            gpus = '0',
+            walltime = '00:04:59'
+        conda:
+            config['envfile']
+        script:
+            'scripts/ANN.py'
+
+rule get_median_scores_and_hyperparams:
+    input:
+        expand('bootstrapping_test{test_percentage}_val{validation_percentage}_repeat' + str(config['repetitions']) + '/{file}_impute_{imputation}/{s}_trial_' + str(config['trial']) + '/outer/{s}_{file}_split{k}_{metric}s.npy', k=N, allow_missing=True),
+        expand('bootstrapping_test{test_percentage}_val{validation_percentage}_repeat' + str(config['repetitions']) + '/{file}_impute_{imputation}/{s}_trial_' + str(config['trial']) + '/inner/{s}_{file}_split{k}_best_inner_hyperparams_{metric}.json', k=N, allow_missing=True)
+    output:
+        expand('bootstrapping_test{test_percentage}_val{validation_percentage}_repeat' + str(config['repetitions']) + '/{file}_impute_{imputation}/{s}_trial_' + str(config['trial']) + '/{s}_{file}_median_{metric}s_and_hyperparams.json', allow_missing=True)
+    params:
+        cpus = '1',
+        mem = '1G',
+        gpus = '0',
+        walltime = '00:00:59'
+    conda:
+        config['envfile']
+    script:
+        'scripts/get_median_scores_and_hyperparams.py'
+
+rule plot_results:
+    input:
+        expand('bootstrapping_test{test_percentage}_val{validation_percentage}_repeat' + str(config['repetitions']) + '/{file}_impute_{imputation}/{s}_trial_' + str(config['trial']) + '/outer/{s}_{file}_split{k}_{metric}s.npy', s=config['solver'], k=N, allow_missing=True)
+    output:
+        expand('bootstrapping_test{test_percentage}_val{validation_percentage}_repeat' + str(config['repetitions']) + '/{file}_impute_{imputation}/{file}_trial_' + str(config['trial']) + '_{metric}plot.pdf', allow_missing=True)
+    params:
+        cpus = '1',
+        mem = '1G',
+        gpus = '0',
+        walltime = '00:00:59'
+    conda:
+        config['envfile']
+    script:
+        'scripts/plot_results.py'
