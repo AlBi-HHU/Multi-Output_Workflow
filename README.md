@@ -4,7 +4,7 @@ Welcome! This is the git repository of the paper "A Critical Review of Multi-Out
 
 To run the workflow on a local machine, please do the following:
 
-First, install [Snakemake](https://snakemake.readthedocs.io/en/stable/getting_started/installation.html) if you haven't already.  
+First, install [Snakemake](https://snakemake.readthedocs.io/en/stable/getting_started/installation.html) if you haven't already. (The version we used is 7.8.5.)
 Then, you can set the configurations like the files to process, solvers to use, hyperparameters, etc. in config.yaml.  
 After done configurating, you can either run  
 `snakemake -s Snakefile_bt --use-conda --cores <number of cores or 'all' (without quotation marks)>` for bootstrapping or  
