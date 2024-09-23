@@ -1,4 +1,4 @@
-# Multi-Output-Workflow
+# Multi-Output_Workflow
 
 Welcome! This is the git repository of the paper "A Critical Review of Multi-Output Support Vector Regression".
 
